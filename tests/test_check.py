@@ -134,11 +134,60 @@ check("overridden DC 1 shows FAIL",
       f"output: {out[:300]}")
 
 
+# ── DC override ID validation ────────────────────────────────────
+
+print("\n=== DC override ID validation ===")
+
+# 11. CDN DCs (201-299) are valid override targets → exit 0
+code, out, err = run_check("--direct", "-S", secret,
+                           "--dc-override", "203:127.0.0.1:1")
+check("CLI override for CDN DC 203 accepted",
+      code == 0,
+      f"got exit {code}\nstdout: {out[:300]}\nstderr: {err[:300]}")
+
+# 12. Identifiers outside the production/CDN ranges are rejected → exit 2
+code, out, err = run_check("--direct", "-S", secret,
+                           "--dc-override", "300:127.0.0.1:1")
+check("CLI override above CDN range rejected",
+      code == 2 and "201-299" in err,
+      f"got exit {code}\nstderr: {err[:300]}")
+
+# 13. The same range applies to TOML dc_override
+with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+    f.write(
+        f'direct = true\n\n[[secret]]\nkey = "{secret}"\n\n'
+        '[[dc_override]]\ndc = 203\nhost = "127.0.0.1"\nport = 1\n'
+    )
+    toml_cdn_path = f.name
+try:
+    code, out, err = run_check("--config", toml_cdn_path)
+    check("TOML override for CDN DC 203 accepted",
+          code == 0,
+          f"got exit {code}\nstdout: {out[:300]}\nstderr: {err[:300]}")
+finally:
+    os.unlink(toml_cdn_path)
+
+# 14. And TOML rejects ids outside it
+with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+    f.write(
+        f'direct = true\n\n[[secret]]\nkey = "{secret}"\n\n'
+        '[[dc_override]]\ndc = 300\nhost = "127.0.0.1"\nport = 1\n'
+    )
+    toml_bad_path = f.name
+try:
+    code, out, err = run_check("--config", toml_bad_path)
+    check("TOML override above CDN range rejected",
+          code == 2 and "201-299" in err,
+          f"got exit {code}\nstderr: {err[:300]}")
+finally:
+    os.unlink(toml_bad_path)
+
+
 # ── NTP test ─────────────────────────────────────────────────────
 
 print("\n=== NTP clock test ===")
 
-# 11. Clock sync check runs
+# 15. Clock sync check runs
 code, out, err = run_check("--direct", "-S", secret)
 check("clock sync present in output",
       "Clock" in out,
@@ -156,7 +205,7 @@ else:
 
 print("\n=== TLS domain probe tests ===")
 
-# 12. Valid domain probe (google.com is universally accessible)
+# 16. Valid domain probe (google.com is universally accessible)
 code, out, err = run_check("--direct", "-S", secret, "-D", "google.com")
 tls_lines = [l for l in out.split("\n") if "TLS google.com" in l]
 check("TLS google.com present",
@@ -169,7 +218,7 @@ if tls_lines:
 else:
     check("TLS google.com → OK with TLS 1.3", False, "no TLS line")
 
-# 13. Unreachable domain → FAIL
+# 17. Unreachable domain → FAIL
 code, out, err = run_check("--direct", "-S", secret, "-D", "nonexistent.invalid")
 check("unreachable domain → exit 1",
       code == 1,
@@ -179,7 +228,7 @@ check("TLS nonexistent.invalid → FAIL",
       len(tls_lines) > 0 and "FAIL" in tls_lines[0],
       f"lines: {tls_lines}")
 
-# 14. SNI mismatch warning (domain IP != container IP)
+# 18. SNI mismatch warning (domain IP != container IP)
 code, out, err = run_check("--direct", "-S", secret, "-D", "google.com")
 sni_lines = [l for l in out.split("\n") if "SNI" in l]
 check("SNI check present for domain",
@@ -193,24 +242,24 @@ print("\n=== Output format tests ===")
 
 code, out, err = run_check("--direct", "-S", secret, "-D", "google.com")
 
-# 15. Summary line present
+# 19. Summary line present
 lines = out.strip().split("\n")
 last_line = lines[-1].strip() if lines else ""
 check("summary line present",
       re.match(r"\d+ passed, \d+ failed, \d+ warning", last_line),
       f"last line: '{last_line}'")
 
-# 16. Config summary
+# 20. Config summary
 check("config summary in output",
       "mode: direct" in out,
       f"output: {out[:200]}")
 
-# 17. Header line
+# 21. Header line
 check("header line present",
       "teleproxy check" in out,
       f"output: {out[:100]}")
 
-# 18. Dot alignment (each result line has dots)
+# 22. Dot alignment (each result line has dots)
 result_lines = [l for l in lines if ".." in l and ("OK" in l or "FAIL" in l or "WARN" in l or "SKIP" in l)]
 check("result lines have dot alignment",
       len(result_lines) >= 7,

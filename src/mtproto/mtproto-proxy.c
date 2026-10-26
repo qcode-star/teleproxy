@@ -67,6 +67,7 @@
 #include "mtproto-config.h"
 #include "mtproto-dc-table.h"
 #include "mtproto-dc-probes.h"
+#include "common/dc-id.h"
 #include "common/tl-parse.h"
 #include "engine/engine.h"
 #include "engine/engine-net.h"
@@ -1502,8 +1503,8 @@ int f_parse_option (int val) {
       }
       *colon1 = 0;
       int dc_id = atoi (buf);
-      if (dc_id <= 0 || dc_id > 5) {
-        kprintf ("--dc-override: dc_id must be 1-5, got %s\n", buf);
+      if (!dc_override_id_is_valid (dc_id)) {
+        kprintf ("--dc-override: dc_id must be 1-5 or a CDN DC 201-299, got %s\n", buf);
         return 2;
       }
 
@@ -1587,7 +1588,7 @@ void mtfront_prepare_parse_options (void) {
   parse_option ("ip-allowlist", required_argument, 0, 2002, "path to file with CIDR ranges to exclusively allow");
   parse_option ("direct", no_argument, 0, 2003, "connect directly to Telegram DCs instead of through ME relays (incompatible with -P)");
   parse_option ("stats-allow-net", required_argument, 0, 2004, "CIDR range to allow stats access from, e.g. 100.64.0.0/10 (repeatable)");
-  parse_option ("dc-override", required_argument, 0, 2005, "override DC address: dc_id:host:port or dc_id:[ipv6]:port (repeatable, direct mode)");
+  parse_option ("dc-override", required_argument, 0, 2005, "override DC address: dc_id:host:port or dc_id:[ipv6]:port (dc_id 1-5 or CDN 201-299; repeatable, direct mode)");
   parse_option ("config", required_argument, 0, 2006, "path to TOML config file (reloaded on SIGHUP for secrets/ACLs)");
   parse_option ("socks5", required_argument, 0, 2007, "route upstream DC connections through SOCKS5 proxy (socks5://[user:pass@]host:port)");
   parse_option ("proxy-protocol", no_argument, 0, 2008, "enable PROXY protocol v1/v2 on client listeners (for use behind HAProxy/nginx/NLB)");

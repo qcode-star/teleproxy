@@ -69,4 +69,10 @@ IPv6 addresses use brackets:
 
 Overrides for a DC replace its built-in addresses entirely. The flag is repeatable — multiple entries for the same DC are tried in order.
 
+CDN DCs are numbered 201–299 (200 + base DC) and can be overridden the same way. Without an override they fall back to their origin DC, which is not where CDN media lives:
+
+```bash
+./teleproxy --direct --dc-override 203:203.0.113.10:443 -S <secret> ...
+```
+
 Docker: `DC_OVERRIDE=2:10.0.0.1:443,2:10.0.0.2:443`

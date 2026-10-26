@@ -27,6 +27,7 @@
 #include <arpa/inet.h>
 #include "common/ip-utils.h"
 #include "common/platform.h"
+#include "common/dc-id.h"
 #include "mtproto/mtproto-dc-table.h"
 
 /*
@@ -126,8 +127,8 @@ const struct dc_entry *direct_dc_lookup (int dc_id) {
 
   /* CDN DCs use 200 + base_dc_id.  Fall back to the origin DC
      when no --dc-override is configured for the CDN DC. */
-  if (dc_id > 200 && dc_id < 300) {
-    dc_id -= 200;
+  if (dc_id >= DC_ID_CDN_MIN && dc_id <= DC_ID_CDN_MAX) {
+    dc_id -= DC_ID_CDN_BASE;
   }
 
   if (is_test) {

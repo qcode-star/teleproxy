@@ -28,6 +28,7 @@
 
 #include <openssl/rand.h>
 
+#include "common/dc-id.h"
 #include "common/ip-utils.h"
 #include "common/platform.h"
 #include "common/toml-config.h"
@@ -1116,8 +1117,8 @@ int cmd_check (int argc, char *argv[]) {
         fprintf (stderr, "error: invalid --dc-override '%s' (expected DC:HOST:PORT)\n", optarg);
         return 2;
       }
-      if (dc_id < 1 || dc_id > 5) {
-        fprintf (stderr, "error: DC ID must be 1-5 (got %d)\n", dc_id);
+      if (!dc_override_id_is_valid (dc_id)) {
+        fprintf (stderr, "error: DC ID must be 1-5 or a CDN DC 201-299 (got %d)\n", dc_id);
         return 2;
       }
       if (dport < 1 || dport > 65535) {
