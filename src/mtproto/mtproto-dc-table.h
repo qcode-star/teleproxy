@@ -48,6 +48,11 @@ const struct dc_entry *direct_dc_lookup (int dc_id);
    Returns 0 on success, -1 on error (bad host or table full). */
 int direct_dc_override (int dc_id, const char *host, int port);
 
+/* Return the --dc-override entry for exactly this dc_id, or NULL.
+   Unlike direct_dc_lookup(), no media/test/CDN normalization is applied
+   and the built-in table is never consulted. */
+const struct dc_entry *direct_dc_override_lookup (int dc_id);
+
 /* Probe IPv6 connectivity by attempting a non-blocking connect to a known DC.
    Returns 1 if IPv6 appears to work, 0 otherwise. */
 int direct_dc_probe_ipv6 (void);

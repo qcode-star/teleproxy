@@ -1013,7 +1013,8 @@ static void check_usage (void) {
     "  --direct               Direct mode (connect to Telegram DCs)\n"
     "  -S, --secret SECRET    32-char hex secret (repeatable)\n"
     "  -D, --domain DOMAIN    TLS domain[:port] (repeatable)\n"
-    "  --dc-override DC:H:P   Override DC address (repeatable)\n"
+    "  --dc-override DC:H:P   Override DC address, DC 1-5 or CDN 201-299\n"
+    "                         (repeatable)\n"
     "  --socks5 URL           Route DC probes through SOCKS5 proxy\n"
     "                         (socks5://[user:pass@]host:port)\n"
   );
@@ -1170,9 +1171,14 @@ int cmd_check (int argc, char *argv[]) {
       }
     }
     for (int i = 0; i < toml_cfg.dc_override_count; i++) {
-      direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
-                          toml_cfg.dc_overrides[i].host,
-                          toml_cfg.dc_overrides[i].port);
+      if (direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
+                              toml_cfg.dc_overrides[i].host,
+                              toml_cfg.dc_overrides[i].port) < 0) {
+        fprintf (stderr, "error: dc_override[%d]: invalid host '%s' or too many "
+                 "addresses for DC %d\n", i, toml_cfg.dc_overrides[i].host,
+                 toml_cfg.dc_overrides[i].dc_id);
+        return 2;
+      }
     }
     /* SOCKS5: CLI overrides TOML */
     if (!socks5_url && toml_cfg.socks5[0]) {
@@ -1201,8 +1207,15 @@ int cmd_check (int argc, char *argv[]) {
 
   check_config (&ctx);
 
-  for (int dc = 1; dc <= 5; dc++) {
+  for (int dc = DC_ID_PROD_MIN; dc <= DC_ID_PROD_MAX; dc++) {
     check_dc (&ctx, dc);
+  }
+
+  /* CDN DCs have no built-in addresses; probe the ones that are overridden */
+  for (int dc = DC_ID_CDN_MIN; dc <= DC_ID_CDN_MAX; dc++) {
+    if (direct_dc_override_lookup (dc)) {
+      check_dc (&ctx, dc);
+    }
   }
 
   check_ntp (&ctx);

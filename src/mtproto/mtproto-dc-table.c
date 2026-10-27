@@ -148,6 +148,15 @@ const struct dc_entry *direct_dc_lookup (int dc_id) {
   return 0;
 }
 
+const struct dc_entry *direct_dc_override_lookup (int dc_id) {
+  for (int i = 0; i < override_count; i++) {
+    if (override_table[i].dc_id == dc_id) {
+      return &override_table[i];
+    }
+  }
+  return 0;
+}
+
 int direct_dc_override (int dc_id, const char *host, int port) {
   dc_table_init ();
 

@@ -1487,25 +1487,26 @@ int f_parse_option (int val) {
     break;
   case 2005:
     {
-      /* Parse dc_id:host:port or dc_id:[ipv6]:port */
+      /* Parse dc_id:host:port or dc_id:[ipv6]:port.  Errors must return -1:
+         the engine aborts only on negative results and ignores the rest. */
       char buf[256];
       int len = strlen (optarg);
       if (len >= (int)sizeof (buf)) {
         kprintf ("--dc-override argument too long: %s\n", optarg);
-        return 2;
+        return -1;
       }
       memcpy (buf, optarg, len + 1);
 
       char *colon1 = strchr (buf, ':');
       if (!colon1) {
         kprintf ("--dc-override: expected dc_id:host:port, got %s\n", optarg);
-        return 2;
+        return -1;
       }
       *colon1 = 0;
       int dc_id = atoi (buf);
       if (!dc_override_id_is_valid (dc_id)) {
         kprintf ("--dc-override: dc_id must be 1-5 or a CDN DC 201-299, got %s\n", buf);
-        return 2;
+        return -1;
       }
 
       char *host_start = colon1 + 1;
@@ -1515,7 +1516,7 @@ int f_parse_option (int val) {
         char *bracket = strchr (host_start, ']');
         if (!bracket || bracket[1] != ':') {
           kprintf ("--dc-override: bad IPv6 format in %s\n", optarg);
-          return 2;
+          return -1;
         }
         *bracket = 0;
         host_start++;
@@ -1525,7 +1526,7 @@ int f_parse_option (int val) {
         char *last_colon = strrchr (host_start, ':');
         if (!last_colon) {
           kprintf ("--dc-override: expected host:port after dc_id in %s\n", optarg);
-          return 2;
+          return -1;
         }
         *last_colon = 0;
         port_str = last_colon + 1;
@@ -1533,11 +1534,11 @@ int f_parse_option (int val) {
       int port = atoi (port_str);
       if (port <= 0 || port > 65535) {
         kprintf ("--dc-override: bad port %s in %s\n", port_str, optarg);
-        return 2;
+        return -1;
       }
       if (direct_dc_override (dc_id, host_start, port) < 0) {
         kprintf ("--dc-override: failed to add %s (bad address or table full)\n", optarg);
-        return 2;
+        return -1;
       }
     }
     break;
@@ -1659,9 +1660,14 @@ void mtfront_pre_init (void) {
       domain_count++;
     }
     for (int i = 0; i < toml_cfg.dc_override_count; i++) {
-      direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
-                          toml_cfg.dc_overrides[i].host,
-                          toml_cfg.dc_overrides[i].port);
+      if (direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
+                              toml_cfg.dc_overrides[i].host,
+                              toml_cfg.dc_overrides[i].port) < 0) {
+        kprintf ("config file error: dc_override[%d]: invalid host '%s' or too many "
+                 "addresses for DC %d\n", i, toml_cfg.dc_overrides[i].host,
+                 toml_cfg.dc_overrides[i].dc_id);
+        exit (1);
+      }
     }
     if (toml_cfg.port > 0 && http_ports_num == 0) {
       http_port[0] = toml_cfg.port;

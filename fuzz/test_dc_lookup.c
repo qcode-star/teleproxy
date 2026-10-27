@@ -4,6 +4,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include "common/dc-id.h"
 #include "mtproto/mtproto-dc-table.h"
 
 static void test_production_dcs (void) {
@@ -92,7 +93,24 @@ static void test_dc_override (void) {
   assert (e && "overridden CDN DC not found");
   assert (e->dc_id == 203);  /* override entry, not stripped to 3 */
 
+  /* Exact-id lookup sees only override entries */
+  assert (direct_dc_override_lookup (203) == e);
+  assert (direct_dc_override_lookup (3) == NULL);
+  assert (direct_dc_override_lookup (201) == NULL);
+
   printf ("  dc-override: OK\n");
+}
+
+static void test_override_id_bounds (void) {
+  static const int valid[] = {1, 5, 201, 203, 205, 299};
+  static const int invalid[] = {0, 6, 100, 200, 300, 999, -1, -203, 10002};
+  for (int i = 0; i < (int) (sizeof (valid) / sizeof (valid[0])); i++) {
+    assert (dc_override_id_is_valid (valid[i]));
+  }
+  for (int i = 0; i < (int) (sizeof (invalid) / sizeof (invalid[0])); i++) {
+    assert (!dc_override_id_is_valid (invalid[i]));
+  }
+  printf ("  override id bounds (1-5, 201-299): OK\n");
 }
 
 int main (void) {
@@ -105,6 +123,7 @@ int main (void) {
   test_test_cdn_dcs ();
   test_invalid_dcs ();
   test_dc_override ();
+  test_override_id_bounds ();
   printf ("all dc_lookup tests passed\n");
   return 0;
 }

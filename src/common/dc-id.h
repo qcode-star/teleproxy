@@ -1,8 +1,11 @@
 /*
     Telegram DC identifiers addressable by direct-mode address overrides.
 
-    Production DCs are numbered 1-5.  CDN DCs are numbered 200 + the base
-    production DC, i.e. 201-299.  Negative media ids are normalized by
+    Production DCs are numbered 1-5.  CDN DCs are numbered 200 + N; Telegram
+    currently uses 201-205, and the whole 201-299 block is accepted so that
+    new CDN DCs can be routed with --dc-override without a rebuild.  Without
+    an override, direct_dc_lookup() maps a CDN DC to its origin DC N, which
+    only exists for N = 1-5.  Negative media ids are normalized by
     direct_dc_lookup() before the override table is consulted, so they are
     not listed separately here.
 */

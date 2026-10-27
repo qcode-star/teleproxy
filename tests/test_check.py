@@ -6,6 +6,7 @@ Runs inside a Docker container with the teleproxy binary available.
 """
 import os
 import re
+import socket
 import subprocess
 import sys
 import tempfile
@@ -134,60 +135,11 @@ check("overridden DC 1 shows FAIL",
       f"output: {out[:300]}")
 
 
-# ── DC override ID validation ────────────────────────────────────
-
-print("\n=== DC override ID validation ===")
-
-# 11. CDN DCs (201-299) are valid override targets → exit 0
-code, out, err = run_check("--direct", "-S", secret,
-                           "--dc-override", "203:127.0.0.1:1")
-check("CLI override for CDN DC 203 accepted",
-      code == 0,
-      f"got exit {code}\nstdout: {out[:300]}\nstderr: {err[:300]}")
-
-# 12. Identifiers outside the production/CDN ranges are rejected → exit 2
-code, out, err = run_check("--direct", "-S", secret,
-                           "--dc-override", "300:127.0.0.1:1")
-check("CLI override above CDN range rejected",
-      code == 2 and "201-299" in err,
-      f"got exit {code}\nstderr: {err[:300]}")
-
-# 13. The same range applies to TOML dc_override
-with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
-    f.write(
-        f'direct = true\n\n[[secret]]\nkey = "{secret}"\n\n'
-        '[[dc_override]]\ndc = 203\nhost = "127.0.0.1"\nport = 1\n'
-    )
-    toml_cdn_path = f.name
-try:
-    code, out, err = run_check("--config", toml_cdn_path)
-    check("TOML override for CDN DC 203 accepted",
-          code == 0,
-          f"got exit {code}\nstdout: {out[:300]}\nstderr: {err[:300]}")
-finally:
-    os.unlink(toml_cdn_path)
-
-# 14. And TOML rejects ids outside it
-with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
-    f.write(
-        f'direct = true\n\n[[secret]]\nkey = "{secret}"\n\n'
-        '[[dc_override]]\ndc = 300\nhost = "127.0.0.1"\nport = 1\n'
-    )
-    toml_bad_path = f.name
-try:
-    code, out, err = run_check("--config", toml_bad_path)
-    check("TOML override above CDN range rejected",
-          code == 2 and "201-299" in err,
-          f"got exit {code}\nstderr: {err[:300]}")
-finally:
-    os.unlink(toml_bad_path)
-
-
 # ── NTP test ─────────────────────────────────────────────────────
 
 print("\n=== NTP clock test ===")
 
-# 15. Clock sync check runs
+# 11. Clock sync check runs
 code, out, err = run_check("--direct", "-S", secret)
 check("clock sync present in output",
       "Clock" in out,
@@ -205,7 +157,7 @@ else:
 
 print("\n=== TLS domain probe tests ===")
 
-# 16. Valid domain probe (google.com is universally accessible)
+# 12. Valid domain probe (google.com is universally accessible)
 code, out, err = run_check("--direct", "-S", secret, "-D", "google.com")
 tls_lines = [l for l in out.split("\n") if "TLS google.com" in l]
 check("TLS google.com present",
@@ -218,7 +170,7 @@ if tls_lines:
 else:
     check("TLS google.com → OK with TLS 1.3", False, "no TLS line")
 
-# 17. Unreachable domain → FAIL
+# 13. Unreachable domain → FAIL
 code, out, err = run_check("--direct", "-S", secret, "-D", "nonexistent.invalid")
 check("unreachable domain → exit 1",
       code == 1,
@@ -228,7 +180,7 @@ check("TLS nonexistent.invalid → FAIL",
       len(tls_lines) > 0 and "FAIL" in tls_lines[0],
       f"lines: {tls_lines}")
 
-# 18. SNI mismatch warning (domain IP != container IP)
+# 14. SNI mismatch warning (domain IP != container IP)
 code, out, err = run_check("--direct", "-S", secret, "-D", "google.com")
 sni_lines = [l for l in out.split("\n") if "SNI" in l]
 check("SNI check present for domain",
@@ -242,28 +194,195 @@ print("\n=== Output format tests ===")
 
 code, out, err = run_check("--direct", "-S", secret, "-D", "google.com")
 
-# 19. Summary line present
+# 15. Summary line present
 lines = out.strip().split("\n")
 last_line = lines[-1].strip() if lines else ""
 check("summary line present",
       re.match(r"\d+ passed, \d+ failed, \d+ warning", last_line),
       f"last line: '{last_line}'")
 
-# 20. Config summary
+# 16. Config summary
 check("config summary in output",
       "mode: direct" in out,
       f"output: {out[:200]}")
 
-# 21. Header line
+# 17. Header line
 check("header line present",
       "teleproxy check" in out,
       f"output: {out[:100]}")
 
-# 22. Dot alignment (each result line has dots)
+# 18. Dot alignment (each result line has dots)
 result_lines = [l for l in lines if ".." in l and ("OK" in l or "FAIL" in l or "WARN" in l or "SKIP" in l)]
 check("result lines have dot alignment",
       len(result_lines) >= 7,
       f"found {len(result_lines)} aligned result lines")
+
+
+# ── CDN DC override tests ────────────────────────────────────────
+
+print("\n=== CDN DC override tests ===")
+
+
+def tcp_listener():
+    """Listen on a free localhost port; connects succeed via the backlog."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    s.listen(64)
+    return s
+
+
+def free_port():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+def dc_line(out, dc):
+    """Return the result line for DC <dc>, or '' if absent."""
+    for l in out.split("\n"):
+        if l.strip().startswith(f"DC {dc} "):
+            return l
+    return ""
+
+
+def write_toml(overrides):
+    """Write a direct-mode TOML config with the given (dc, host, port) rows."""
+    body = f'direct = true\n\n[[secret]]\nkey = "{secret}"\n'
+    for dc, host, port in overrides:
+        body += f'\n[[dc_override]]\ndc = {dc}\nhost = "{host}"\nport = {port}\n'
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write(body)
+        return f.name
+
+
+def run_proxy(*args, wait=3):
+    """Start the proxy; return (exit_code or None if still running, output)."""
+    cmd = [BIN, "-H", str(free_port())] + list(args)
+    if os.geteuid() == 0:
+        # As root the engine drops privileges to 'teleproxy', absent here
+        cmd[1:1] = ["-u", "nobody"]
+    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                         text=True)
+    try:
+        out, _ = p.communicate(timeout=wait)
+        return p.returncode, out
+    except subprocess.TimeoutExpired:
+        p.terminate()
+        out, _ = p.communicate(timeout=10)
+        return None, out
+
+
+listener = tcp_listener()
+cdn_port = listener.getsockname()[1]
+
+# 19. Overridden CDN DC is probed → OK
+code, out, err = run_check("--direct", "-S", secret,
+                           "--dc-override", f"203:127.0.0.1:{cdn_port}")
+check("CLI override for CDN DC 203 → exit 0",
+      code == 0,
+      f"got exit {code}\nstdout: {out[:500]}\nstderr: {err[:300]}")
+check("CDN DC 203 probed and OK",
+      "OK" in dc_line(out, 203),
+      f"line: '{dc_line(out, 203)}'")
+
+# 20. Unreachable CDN override is reported, not silently accepted → exit 1
+code, out, err = run_check("--direct", "-S", secret,
+                           "--dc-override", "203:127.0.0.1:1")
+check("unreachable CDN override → exit 1",
+      code == 1,
+      f"got exit {code}\nstdout: {out[:500]}")
+check("CDN DC 203 shows FAIL",
+      "FAIL" in dc_line(out, 203),
+      f"line: '{dc_line(out, 203)}'")
+
+# 21. CDN DCs without an override are not probed
+code, out, err = run_check("--direct", "-S", secret)
+check("no CDN lines without override",
+      not re.search(r"^\s*DC 2\d\d ", out, re.M),
+      f"output: {out[:500]}")
+
+# 22. Ids outside 1-5 and 201-299 are rejected → exit 2
+for bad in ("0", "6", "200", "300"):
+    code, out, err = run_check("--direct", "-S", secret,
+                               "--dc-override", f"{bad}:127.0.0.1:1")
+    check(f"CLI override for DC {bad} rejected",
+          code == 2 and "201-299" in err,
+          f"got exit {code}\nstderr: {err[:300]}")
+
+# 23. TOML CDN override is probed too
+path = write_toml([(203, "127.0.0.1", cdn_port)])
+try:
+    code, out, err = run_check("--config", path)
+    check("TOML override for CDN DC 203 → exit 0 and OK",
+          code == 0 and "OK" in dc_line(out, 203),
+          f"got exit {code}\nstdout: {out[:500]}\nstderr: {err[:300]}")
+finally:
+    os.unlink(path)
+
+# 24. TOML rejects ids outside the ranges
+path = write_toml([(300, "127.0.0.1", 1)])
+try:
+    code, out, err = run_check("--config", path)
+    check("TOML override for DC 300 rejected",
+          code == 2 and "201-299" in err,
+          f"got exit {code}\nstderr: {err[:300]}")
+finally:
+    os.unlink(path)
+
+# 25. TOML accepts up to 16 override rows, rejects more
+rows = [(201 + i, "127.0.0.1", cdn_port) for i in range(16)]
+path = write_toml(rows)
+try:
+    code, out, err = run_check("--config", path)
+    check("TOML with 16 override rows → exit 0",
+          code == 0,
+          f"got exit {code}\nstdout: {out[:500]}\nstderr: {err[:300]}")
+finally:
+    os.unlink(path)
+path = write_toml(rows + [(217, "127.0.0.1", cdn_port)])
+try:
+    code, out, err = run_check("--config", path)
+    check("TOML with 17 override rows rejected",
+          code == 2 and "too many dc_override" in err,
+          f"got exit {code}\nstderr: {err[:300]}")
+finally:
+    os.unlink(path)
+
+# 26. A TOML row that cannot be applied is an error, not silently dropped
+path = write_toml([(203, "not-an-ip", 443)])
+try:
+    code, out, err = run_check("--config", path)
+    check("TOML override with bad host rejected",
+          code == 2 and "dc_override[0]" in err,
+          f"got exit {code}\nstderr: {err[:300]}")
+finally:
+    os.unlink(path)
+
+# 27. The proxy itself refuses an invalid --dc-override instead of ignoring it
+code, out = run_proxy("--direct", "-S", secret,
+                      "--dc-override", "300:127.0.0.1:443")
+check("proxy exits on --dc-override 300",
+      code is not None and code != 0 and "201-299" in out,
+      f"exit {code}\noutput: {out[-500:]}")
+
+# 28. ...and starts with a CDN override
+code, out = run_proxy("--direct", "-S", secret,
+                      "--dc-override", "203:127.0.0.1:443")
+check("proxy starts with --dc-override 203",
+      code is None,
+      f"exit {code}\noutput: {out[-500:]}")
+
+# 29. The proxy also refuses a TOML override it cannot apply
+path = write_toml([(203, "not-an-ip", 443)])
+try:
+    code, out = run_proxy("--config", path)
+    check("proxy exits on TOML override with bad host",
+          code == 1 and "dc_override[0]" in out,
+          f"exit {code}\noutput: {out[-500:]}")
+finally:
+    os.unlink(path)
+
+listener.close()
 
 
 # ── Summary ──────────────────────────────────────────────────────
