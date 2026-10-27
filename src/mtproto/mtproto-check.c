@@ -263,7 +263,11 @@ struct check_result {
   char detail[256];
 };
 
-#define MAX_CHECK_RESULTS 48
+/* Configuration, SOCKS5 and clock sync; one line per DC probe (production
+   DCs plus up to DC_OVERRIDE_MAX_DCS overridden CDN DCs); TLS and SNI per
+   domain. */
+#define MAX_CHECK_RESULTS \
+  (3 + DC_ID_PROD_MAX + DC_OVERRIDE_MAX_DCS + 2 * TOML_CONFIG_MAX_DOMAINS)
 
 struct check_context {
   int is_direct;
@@ -1126,8 +1130,10 @@ int cmd_check (int argc, char *argv[]) {
         fprintf (stderr, "error: port must be 1-65535 (got %d)\n", dport);
         return 2;
       }
-      if (direct_dc_override (dc_id, host, dport) < 0) {
-        fprintf (stderr, "error: invalid host in --dc-override '%s'\n", optarg);
+      int rc = direct_dc_override (dc_id, host, dport);
+      if (rc < 0) {
+        fprintf (stderr, "error: --dc-override '%s': %s\n", optarg,
+                 direct_dc_override_strerror (rc));
         return 2;
       }
       break;
@@ -1171,12 +1177,12 @@ int cmd_check (int argc, char *argv[]) {
       }
     }
     for (int i = 0; i < toml_cfg.dc_override_count; i++) {
-      if (direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
-                              toml_cfg.dc_overrides[i].host,
-                              toml_cfg.dc_overrides[i].port) < 0) {
-        fprintf (stderr, "error: dc_override[%d]: invalid host '%s' or too many "
-                 "addresses for DC %d\n", i, toml_cfg.dc_overrides[i].host,
-                 toml_cfg.dc_overrides[i].dc_id);
+      int rc = direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
+                                   toml_cfg.dc_overrides[i].host,
+                                   toml_cfg.dc_overrides[i].port);
+      if (rc < 0) {
+        fprintf (stderr, "error: dc_override[%d] (DC %d): %s\n", i,
+                 toml_cfg.dc_overrides[i].dc_id, direct_dc_override_strerror (rc));
         return 2;
       }
     }

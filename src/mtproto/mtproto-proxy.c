@@ -1536,8 +1536,10 @@ int f_parse_option (int val) {
         kprintf ("--dc-override: bad port %s in %s\n", port_str, optarg);
         return -1;
       }
-      if (direct_dc_override (dc_id, host_start, port) < 0) {
-        kprintf ("--dc-override: failed to add %s (bad address or table full)\n", optarg);
+      int rc = direct_dc_override (dc_id, host_start, port);
+      if (rc < 0) {
+        kprintf ("--dc-override: cannot add %s: %s\n", optarg,
+                 direct_dc_override_strerror (rc));
         return -1;
       }
     }
@@ -1660,12 +1662,13 @@ void mtfront_pre_init (void) {
       domain_count++;
     }
     for (int i = 0; i < toml_cfg.dc_override_count; i++) {
-      if (direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
-                              toml_cfg.dc_overrides[i].host,
-                              toml_cfg.dc_overrides[i].port) < 0) {
-        kprintf ("config file error: dc_override[%d]: invalid host '%s' or too many "
-                 "addresses for DC %d\n", i, toml_cfg.dc_overrides[i].host,
-                 toml_cfg.dc_overrides[i].dc_id);
+      int rc = direct_dc_override (toml_cfg.dc_overrides[i].dc_id,
+                                   toml_cfg.dc_overrides[i].host,
+                                   toml_cfg.dc_overrides[i].port);
+      if (rc < 0) {
+        /* Rows are validated at parse time; this is the CLI + TOML total */
+        kprintf ("config file error: dc_override[%d] (DC %d): %s\n", i,
+                 toml_cfg.dc_overrides[i].dc_id, direct_dc_override_strerror (rc));
         exit (1);
       }
     }
